@@ -51,11 +51,16 @@ flags.DEFINE_integer('train_size', 250, 'Number of authors data to use')
 flags.DEFINE_integer('test_size', 125, 'Number of authors data to test')
 flags.DEFINE_integer('max_iters', 1000, 'Max iterations for optimization')
 flags.DEFINE_integer('print_every', 1, 'Print metrics every iteration')
+flags.DEFINE_integer('epochs', 5, 'Number of epochs')
+flags.DEFINE_float('percent', 1.0, 'Percent of data to use for learning')
 flags.DEFINE_integer(
     "max_seq_length", 32,
     "The maximum total input sequence length after WordPiece tokenization. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
+flags.DEFINE_integer(
+  'read_model_epoch', -1,
+  'If not -1, will read that model for the given epoch instead of re-training')
 flags.DEFINE_string(
     "init_checkpoint", os.path.join(BERT_DIR, 'bert_model.ckpt'),
     "Initial checkpoint (usually from a pre-trained BERT model).")
@@ -69,6 +74,20 @@ flags.DEFINE_string(
 flags.DEFINE_string('metric', 'l2', 'Metric to optimize')
 flags.DEFINE_string('mapper', 'linear', 'Mapper to use')
 flags.DEFINE_string('model', 'multiset', 'Model for learning based inversion')
+flags.DEFINE_string(
+  'read_files', '',
+  'If supplied, will attempt to read train_x and test_x files, otherwise, generate.'
+  'The string should be a base path to which \'train_x.bin\' and \'test_x.bin\' will be appended.')
+flags.DEFINE_string(
+  'encrypted_tag', '',
+  'The prefix to be prepended to \'train_x.bin\' and \'test_x.bin\' file name.'
+)
+flags.DEFINE_boolean(
+  'encrypted_training', False,
+  'If true, will use encrypted embeddings for training as well')
+flags.DEFINE_boolean(
+  'gen_npy', False,
+  'If true, will read {train,test}_y.txt and generate .npy')
 flags.DEFINE_boolean(
   'learning', False,
   'Learning based inversion or optimize based')
@@ -136,6 +155,11 @@ def model_fn_builder(bert_config, init_checkpoint, use_one_hot_embeddings):
   tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
   return input_ids, input_mask, input_type_ids, outputs
 
+def sents_to_examples(sents, tokenizer):
+    examples = read_examples(sents, tokenization.convert_to_unicode)
+    return convert_examples_to_features(examples=examples,
+                                        seq_length=FLAGS.max_seq_length,
+                                        tokenizer=tokenizer)
 
 def load_inversion_data():
   bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
@@ -150,12 +174,6 @@ def load_inversion_data():
 
   if FLAGS.cross_domain:
     train_sents = load_cross_domain_data(800000, split_word=False)
-
-  def sents_to_examples(sents):
-    examples = read_examples(sents, tokenization.convert_to_unicode)
-    return convert_examples_to_features(examples=examples,
-                                        seq_length=FLAGS.max_seq_length,
-                                        tokenizer=tokenizer)
 
   input_ids, input_mask, input_type_ids, outputs = model_fn_builder(
       bert_config=bert_config,
@@ -190,10 +208,12 @@ def load_inversion_data():
     else:
       return np.vstack(embs_low)
 
-  train_features = sents_to_examples(train_sents)
+  assert not (learn_mapping and FLAGS.read_files != "")
+
+  train_features = sents_to_examples(train_sents, tokenizer)
   train_x = encode_example(train_features)
 
-  test_features = sents_to_examples(test_sents)
+  test_features = sents_to_examples(test_sents, tokenizer)
   test_x = encode_example(test_features)
   tf.keras.backend.clear_session()
 
@@ -424,11 +444,56 @@ def learning_inversion():
   cls_id = tokenizer.vocab['[CLS]']
   sep_id = tokenizer.vocab['[SEP]']
   mask_id = tokenizer.vocab['[MASK]']
-
-  train_x, train_y, test_x, test_y = load_inversion_data()
   filters = [cls_id, sep_id, mask_id, 0]
-  train_y = filter_labels(train_y[0], filters)
-  test_y = filter_labels(test_y[0], filters)
+  
+  if FLAGS.read_files == "":
+    log("Computing")
+    
+    train_x, train_y, test_x, test_y = load_inversion_data()
+    train_y = filter_labels(train_y[0], filters)
+    test_y = filter_labels(test_y[0], filters)
+    
+    log("Will put to files")
+    train_x.tofile("train_x.bin")
+    test_x.tofile("test_x.bin")
+    np.save('train_y.npy', train_y, allow_pickle=True)
+    np.save('test_y.npy', test_y, allow_pickle=True)
+    log("Written")
+  else:
+    log(f"Will read files from {FLAGS.read_files} with tag {FLAGS.encrypted_tag}")
+    train_x = np.fromfile(f"{FLAGS.read_files}/{FLAGS.encrypted_tag if FLAGS.encrypted_training else ''}train_x.bin", dtype=np.float32)
+    train_x = train_x.reshape((200000, 768))
+    test_x = np.fromfile(f"{FLAGS.read_files}/{FLAGS.encrypted_tag}test_x.bin", dtype=np.float32)
+    test_x = test_x.reshape((100000, 768))
+
+    if not FLAGS.gen_npy:
+      train_y = np.load(f"{FLAGS.read_files}/train_y.npy", allow_pickle=True)
+      test_y = np.load(f"{FLAGS.read_files}/test_y.npy", allow_pickle=True)
+    else:
+      def generate_tokenized_sents(tag):
+        lines = []
+        with open(f"{FLAGS.read_files}/{tag}_y.txt", "r") as sents_file:
+          while True:
+            line = sents_file.readline()
+            if not line:
+              break
+            lines += [line]
+        tokenized = sents_to_examples(lines, tokenizer)
+        tokenized = filter_labels(tokenized[0], filters)
+        np.save(f"{FLAGS.read_files}/{tag}_y.npy", tokenized, allow_pickle=True)
+        return tokenized
+
+      train_y = generate_tokenized_sents("train")
+      test_y = generate_tokenized_sents("test")
+      log("Generated .npy")
+    
+    log("Read")
+    
+  if FLAGS.percent < 1.0:
+    train_x = train_x[:int(len(train_x) * FLAGS.percent) ]
+    test_x = test_x[:int(len(test_x) * FLAGS.percent) ]
+    train_y = train_y[:int(len(train_y) * FLAGS.percent) ]
+    test_y = test_y[:int(len(test_y) * FLAGS.percent) ]
 
   label_freq = count_label_freq(train_y, num_words)
   log('Imbalace ratio: {}'.format(np.max(label_freq) / np.min(label_freq)))
@@ -456,8 +521,8 @@ def learning_inversion():
     raise ValueError(FLAGS.model)
 
   preds, loss = model.forward(inputs, labels, training)
-  true_pos, false_pos, false_neg = tp_fp_fn_metrics(labels, preds)
-  eval_fetch = [loss, true_pos, false_pos, false_neg]
+  true_pos, false_pos, false_neg, tp_indices, fp_indices, fn_indices = tp_fp_fn_metrics(labels, preds)
+  eval_fetch = [loss, true_pos, false_pos, false_neg, tp_indices, fp_indices, fn_indices]
 
   t_vars = tf.trainable_variables()
   wd = FLAGS.wd
@@ -472,57 +537,98 @@ def learning_inversion():
   with tf.control_dependencies([train_ops]):
     train_ops = tf.group(*post_ops)
 
+  saver = tf.train.Saver()
+
   log('Train attack model with {} data...'.format(len(train_x)))
   with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
     sess.run(tf.global_variables_initializer())
 
-    for epoch in range(30):
+    for epoch in range(FLAGS.epochs):
+      model_name = f"{'trec-' if 'trec' in FLAGS.read_files else ''}{'latest-' if FLAGS.percent < 1.0 else ''}{FLAGS.encrypted_tag if FLAGS.encrypted_training else ''}inversion-model-{epoch}"
+
+      if FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch:
+        log(f"Skipping epoch {epoch}")
+        continue
+
       train_iterations = 0
       train_loss = 0
 
-      for batch_idx in iterate_minibatches_indices(len(train_y),
-                                                   FLAGS.batch_size, True):
-        one_hot_labels = np.zeros((len(batch_idx), num_words),
-                                  dtype=np.float32)
-        for i, idx in enumerate(batch_idx):
-          one_hot_labels[i][train_y[idx]] = 1
-        feed = {inputs: train_x[batch_idx], labels: one_hot_labels,
-                training: True}
-        err, _ = sess.run([loss, train_ops], feed_dict=feed)
-        train_loss += err
-        train_iterations += 1
+      if FLAGS.read_model_epoch == -1 or FLAGS.read_model_epoch < epoch:
+        with tqdm.tqdm(total=len(train_y)) as pbar:
+          pbar.set_description(f"Epoch {epoch}: training")
+          for batch_idx in iterate_minibatches_indices(len(train_y),
+                                                      FLAGS.batch_size, True):
+            one_hot_labels = np.zeros((len(batch_idx), num_words),
+                                      dtype=np.float32)
+            for i, idx in enumerate(batch_idx):
+              one_hot_labels[i][train_y[idx]] = 1
+            feed = {inputs: train_x[batch_idx], labels: one_hot_labels,
+                    training: True}
+            err, _ = sess.run([loss, train_ops], feed_dict=feed)
+            train_loss += err
+            train_iterations += 1
+            pbar.update(len(batch_idx))
+
+        log(f"Will write model: {model_name}")
+        os.makedirs(f"./model-files/{model_name}", exist_ok=True)
+        saver.save(sess, f"./model-files/{model_name}/model")
+      else:
+        log(f"Will read model: {model_name}")
+        saver = tf.train.import_meta_graph(f"./model-files/{model_name}/model.meta")
+        saver.restore(sess, tf.train.latest_checkpoint(f"./model-files/{model_name}"))
+        train_iterations = epoch + 1
 
       test_iterations = 0
       test_loss = 0
       test_tp, test_fp, test_fn = 0, 0, 0
 
-      for batch_idx in iterate_minibatches_indices(len(test_y), batch_size=512,
-                                                   shuffle=False):
-        one_hot_labels = np.zeros((len(batch_idx), num_words),
-                                  dtype=np.float32)
-        for i, idx in enumerate(batch_idx):
-          one_hot_labels[i][test_y[idx]] = 1
-        feed = {inputs: test_x[batch_idx], labels: one_hot_labels,
-                training: False}
+      words = {
+        "tp": [],
+        "fp": [],
+        "fn": [],
+      }
 
-        fetch = sess.run(eval_fetch, feed_dict=feed)
-        err, tp, fp, fn = fetch
+      with tqdm.tqdm(total=len(test_y)) as pbar:
+        pbar.set_description(f"Epoch {epoch}: validation")
+        for batch_idx in iterate_minibatches_indices(len(test_y), batch_size=512,
+                                                    shuffle=False):
+          one_hot_labels = np.zeros((len(batch_idx), num_words),
+                                    dtype=np.float32)
+          for i, idx in enumerate(batch_idx):
+            one_hot_labels[i][test_y[idx]] = 1
+          feed = {inputs: test_x[batch_idx], labels: one_hot_labels,
+                  training: False}
 
-        test_iterations += 1
-        test_loss += err
-        test_tp += tp
-        test_fp += fp
-        test_fn += fn
+          fetch = sess.run(eval_fetch, feed_dict=feed)
+          err, tp, fp, fn, tp_indices, fp_indices, fn_indices = fetch
+          
+          words["tp"] += [ str(tokenizer.convert_ids_to_tokens([word])[0]) for sentence_id, word in tp_indices ]
+          words["fp"] += [ str(tokenizer.convert_ids_to_tokens([word])[0]) for sentence_id, word in fp_indices ]
+          words["fn"] += [ str(tokenizer.convert_ids_to_tokens([word])[0]) for sentence_id, word in fn_indices ]
+
+          test_iterations += 1
+          test_loss += err
+          test_tp += tp
+          test_fp += fp
+          test_fn += fn
+
+          pbar.update(len(batch_idx))
 
       precision = test_tp / (test_tp + test_fp) * 100
       recall = test_tp / (test_tp + test_fn) * 100
       f1 = 2 * precision * recall / (precision + recall)
-
+      
       log("Epoch: {}, train loss: {:.4f}, test loss: {:.4f}, "
           "pre: {:.2f}%, rec: {:.2f}%, f1: {:.2f}%".format(
             epoch, train_loss / train_iterations,
             test_loss / test_iterations,
             precision, recall, f1))
+      
+      for metric in ["tp", "fp", "fn"]:
+        with open(f"./word-dumps/{model_name}-against-{FLAGS.encrypted_tag}-{metric}.txt", "w", encoding="utf-8") as file:
+          for word in words[metric]:
+            file.write("%s\n" % word)
+      log(f"Written to {model_name}-against-{FLAGS.encrypted_tag}-{{tp,fp,fn,tn}}.txt")
 
 
 def main(_):

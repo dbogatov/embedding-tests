@@ -20,11 +20,11 @@ import numpy as np
 import os
 import random
 
-DATA_DIR = '/path/to/data/'
-MODEL_DIR = '/path/to/model/'
-EMB_DIR = '/path/to/save/embedding/'
+DATA_DIR = '/projectnb/privknn/attack-data/data/'
+MODEL_DIR = '/projectnb/privknn/attack-data/model/'
+EMB_DIR = '/projectnb/privknn/attack-data/embedding/'
 
-WORD_EMB_PATH = '/path/to/word/embedding/'
+WORD_EMB_PATH = '/projectnb/privknn/attack-data/word-embedding/'
 GLOVE_EMBEDDING_PATH = WORD_EMB_PATH + 'glove.840B.300d_gensim.txt'
 W2V_EMBEDDING_PATH = WORD_EMB_PATH + 'GoogleNews-vectors-negative300.bin'
 
@@ -44,7 +44,7 @@ def load_pretrained_word_embedding(glove=False):
   from gensim.models import KeyedVectors
   print("loading pretrained embedding from disk...")
   word_emb_model = KeyedVectors.load_word2vec_format(
-    GLOVE_EMBEDDING_PATH if glove else W2V_EMBEDDING_PATH, binary=not glove)
+    GLOVE_EMBEDDING_PATH if glove else W2V_EMBEDDING_PATH, binary=not glove, unicode_errors="ignore")
   return word_emb_model
 
 

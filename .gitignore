@@ -1,0 +1,6 @@
+*.pyc
+logs/*
+job/*.o*
+job/*.po*
+word-dumps/*
+model-files/*

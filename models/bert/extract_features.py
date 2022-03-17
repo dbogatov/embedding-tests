@@ -317,7 +317,7 @@ def read_examples(input_file):
   """Read a list of `InputExample`s from an input file."""
   examples = []
   unique_id = 0
-  with tf.gfile.GFile(input_file, "r") as reader:
+  with tf.io.gfile.GFile(input_file, "r") as reader:
     while True:
       line = tokenization.convert_to_unicode(reader.readline())
       if not line:
@@ -381,7 +381,7 @@ def main(_):
   input_fn = input_fn_builder(
       features=features, seq_length=FLAGS.max_seq_length)
 
-  with codecs.getwriter("utf-8")(tf.gfile.Open(FLAGS.output_file,
+  with codecs.getwriter("utf-8")(tf.io.gfile.Open(FLAGS.output_file,
                                                "w")) as writer:
     for result in estimator.predict(input_fn, yield_single_examples=True):
       unique_id = int(result["unique_id"])

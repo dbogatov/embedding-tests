@@ -86,7 +86,12 @@ def tp_fp_fn_metrics(y_true, y_pred):
                         axis=None)
   fn = tf.count_nonzero(tf.logical_and(tf.logical_not(y_pred), y_true),
                         axis=None)
-  return tp, fp, fn
+  
+  tp_indices = tf.where(tf.logical_and(y_pred, y_true))
+  fp_indices = tf.where(tf.logical_and(y_pred, tf.logical_not(y_true)))
+  fn_indices = tf.where(tf.logical_and(tf.logical_not(y_pred), y_true))
+
+  return tp, fp, fn, tp_indices, fp_indices, fn_indices
 
 
 def count_label_freq(labels, num_words):

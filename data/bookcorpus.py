@@ -20,6 +20,11 @@ from joblib import Parallel, delayed
 from collections import Counter, defaultdict
 import unidecode
 import numpy as np
+
+import sys
+sys.path.append('/project/privknn/embedding-tests/data')
+# print(sys.path)
+
 from common import DATA_DIR, GLOVE_EMBEDDING_PATH, W2V_EMBEDDING_PATH, gen_seed
 
 try:
@@ -105,7 +110,8 @@ def tokenize_file(filename):
     for line in tokenized_sents:
       if line[-1] != '\n':
         line += '\n'
-      f.write(line.decode('utf-8'))
+      # f.write(line.decode('utf-8'))
+      f.write(line)
 
 
 def process_raw_files(n_jobs=48):
@@ -166,7 +172,8 @@ def build_vocabulary(exp_id=0, n_jobs=48, vocab_size=50000,
 
     with open(VOCAB_PATH.format(exp_id), 'w') as f:
       for w, c, in wordcount:
-        f.write('{}\t{}\n'.format(w.encode("utf-8"), c))
+        # f.write('{}\t{}\n'.format(w.encode("utf-8"), c))
+        f.write('{}\t{}\n'.format(w, c))
 
   return vocab
 
@@ -250,7 +257,7 @@ def save_existed_word_embedding(exp_id=0, glove=True):
       word_vectors[i] = get_rand_vec()
       missed += 1
     else:
-      word_vectors[i] = word_emb_model.wv[word].astype(np.float32)
+      word_vectors[i] = word_emb_model[word].astype(np.float32)
 
   print('Missed {} of {} words'.format(missed, len(vocab)))
   np.savez(os.path.join(BOOKCORPUS_DATA_DIR, '{}{}.npz'.format(
@@ -334,7 +341,8 @@ def load_book_author(filenames=None):
       data = json.loads(line.strip())
       _, book_id = os.path.split(data['page'])
       _, file_name = os.path.split(data['epub'])
-      book_name = '{}__{}'.format(book_id, file_name.replace('.epub', '.txt'))
+      # book_name = '{}__{}'.format(book_id, file_name.replace('.epub', '.txt'))
+      book_name = '{}.txt'.format(file_name)
       if book_name in filenames:
         book_attributes[book_name] = remove_duplicate_author(data['author'])
 
@@ -441,7 +449,8 @@ def filter_tokenized_file(filename, vocab, min_len=5):
     with smart_open.open(os.path.join(BOOKCORPUS_AUTHOR_DIR, filename), 'w',
                          encoding='utf-8') as f:
       for sent in sents:
-        f.write(sent.decode('utf-8') + '\n')
+        # f.write(sent.decode('utf-8') + '\n')
+        f.write(sent + '\n')
 
 
 def authorship_filter(exp_id=0):
@@ -486,8 +495,13 @@ def load_author_data(min_book=2, train_size=50, test_size=300,
   filenames = os.listdir(BOOKCORPUS_AUTHOR_DIR)
   attribute_dict = load_book_author(filenames)
   author_book_count = Counter(attribute_dict.values())
-  filtered_filenames = [fname for fname in filenames if
-                        author_book_count[attribute_dict[fname]] >= min_book]
+  filtered_filenames = []
+  for fname in filenames:
+    if fname in attribute_dict:
+      if author_book_count[attribute_dict[fname]] >= min_book:
+        filtered_filenames += [fname]
+  print(f"filenames: {len(filenames)}")
+  print(f"filtered: {len(filtered_filenames)}")
 
   if remove_punct:
     file_sents = Parallel(n_jobs=8)(
@@ -560,6 +574,14 @@ def load_author_data(min_book=2, train_size=50, test_size=300,
 
   train_sents = np.concatenate(train_sents)
   test_sents = np.concatenate(test_sents)
+  
+  print("TRAIN SENTS")
+  print(len(train_sents))
+  print(train_sents)
+  
+  print("TEST SENTS")
+  print(len(test_sents))
+  print(test_sents)
 
   if len(unlabeled_sents) > 0:
     unlabeled_sents = np.concatenate(unlabeled_sents)
