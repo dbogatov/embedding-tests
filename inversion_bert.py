@@ -544,7 +544,13 @@ def learning_inversion():
     sess.run(tf.global_variables_initializer())
 
     for epoch in range(FLAGS.epochs):
-      model_name = f"{'trec-' if 'trec' in FLAGS.read_files else ''}{'latest-' if FLAGS.percent < 1.0 else ''}{FLAGS.encrypted_tag if FLAGS.encrypted_training else ''}inversion-model-{epoch}"
+      model_name = "{tmp}--inversion-model-v2--{dataset}--{training}--{tag}--{epoch}".format(
+        tmp = "temp" if FLAGS.percent < 1.0 else "perm",
+        dataset = "trec" if "trec" in FLAGS.read_files else "bookcorpus",
+        training = "enc" if FLAGS.encrypted_training else "normal",
+        tag = FLAGS.encrypted_tag if FLAGS.encrypted_tag != "" else "plain",
+        epoch = epoch
+      )
 
       if FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch:
         log(f"Skipping epoch {epoch}")

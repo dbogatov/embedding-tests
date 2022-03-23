@@ -7,7 +7,7 @@
 #$ -l gpus=1
 #$ -pe omp 8
 
-echo "Option: $1"
+echo $@
 
 echo "Start!"
 
@@ -27,7 +27,7 @@ do
 			TREC="${OPTARG}"
 			;;
 		c)
-			ENCn_TAG="--encrypted_tag ${OPTARG}"
+			-="--encrypted_tag ${OPTARG}"
 			;;
 		n)
 			ENC_TRAINING="--encrypted_training ${OPTARG}"
