@@ -51,7 +51,7 @@ flags.DEFINE_integer('train_size', 250, 'Number of authors data to use')
 flags.DEFINE_integer('test_size', 125, 'Number of authors data to test')
 flags.DEFINE_integer('max_iters', 1000, 'Max iterations for optimization')
 flags.DEFINE_integer('print_every', 1, 'Print metrics every iteration')
-flags.DEFINE_integer('epochs', 5, 'Number of epochs')
+flags.DEFINE_integer('epochs', 30, 'Number of epochs')
 flags.DEFINE_float('percent', 1.0, 'Percent of data to use for learning')
 flags.DEFINE_integer(
     "max_seq_length", 32,
@@ -88,6 +88,9 @@ flags.DEFINE_boolean(
 flags.DEFINE_boolean(
   'gen_npy', False,
   'If true, will read {train,test}_y.txt and generate .npy')
+flags.DEFINE_boolean(
+  'continue_training', False,
+  'If true, will simply continue training given model regardless of the --read_model_epoch')
 flags.DEFINE_boolean(
   'learning', False,
   'Learning based inversion or optimize based')
@@ -539,27 +542,42 @@ def learning_inversion():
 
   saver = tf.train.Saver()
 
+  def get_model_name(epoch):
+    return "{tmp}--inversion-model-v2--{dataset}--{training}--{tag}--{epoch}".format(
+      tmp = "temp" if FLAGS.percent < 1.0 else "perm",
+      dataset = "trec" if "trec" in FLAGS.read_files else "bookcorpus",
+      training = "enc" if FLAGS.encrypted_training else "normal",
+      tag = FLAGS.encrypted_tag if FLAGS.encrypted_tag != "" else "plain",
+      epoch = epoch
+    )
+
+  def should_skip(epoch):
+    if FLAGS.continue_training:
+      return os.path.isdir(f"./model-files/{get_model_name(epoch + 1)}")
+    else:
+      return FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch
+
+  def should_train(epoch):
+    if FLAGS.continue_training:
+      return not os.path.isdir(f"./model-files/{get_model_name(epoch)}")
+    else:
+      return FLAGS.read_model_epoch == -1 or FLAGS.read_model_epoch < epoch
+
   log('Train attack model with {} data...'.format(len(train_x)))
   with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
     sess.run(tf.global_variables_initializer())
 
     for epoch in range(FLAGS.epochs):
-      model_name = "{tmp}--inversion-model-v2--{dataset}--{training}--{tag}--{epoch}".format(
-        tmp = "temp" if FLAGS.percent < 1.0 else "perm",
-        dataset = "trec" if "trec" in FLAGS.read_files else "bookcorpus",
-        training = "enc" if FLAGS.encrypted_training else "normal",
-        tag = FLAGS.encrypted_tag if FLAGS.encrypted_tag != "" else "plain",
-        epoch = epoch
-      )
+      model_name = get_model_name(epoch)
 
-      if FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch:
+      if should_skip(epoch):
         log(f"Skipping epoch {epoch}")
         continue
 
       train_iterations = 0
       train_loss = 0
 
-      if FLAGS.read_model_epoch == -1 or FLAGS.read_model_epoch < epoch:
+      if should_train(epoch):
         with tqdm.tqdm(total=len(train_y)) as pbar:
           pbar.set_description(f"Epoch {epoch}: training")
           for batch_idx in iterate_minibatches_indices(len(train_y),
