@@ -71,6 +71,7 @@ flags.DEFINE_boolean('encrypted_training', False, 'If true, will use encrypted e
 flags.DEFINE_boolean('gen_npy', False, 'If true, will read {train,test}_y.txt and generate .npy')
 flags.DEFINE_boolean('continue_training', False, 'If true, will simply continue training given model regardless of the --read_model_epoch')
 flags.DEFINE_boolean('validation_only', False, 'If true, will only validate latest model')
+flags.DEFINE_boolean('validation_all', False, 'If true, will validate all epoch model, but not train')
 flags.DEFINE_boolean('learning', False, 'Learning based inversion or optimize based')
 flags.DEFINE_boolean('cross_domain', False, 'Cross domain data for learning based inversion')
 flags.DEFINE_bool("do_lower_case", True, "Whether to lower case the input text. Should be True for uncased "
@@ -449,13 +450,16 @@ def learning_inversion():
 		)
 
 	def should_skip(epoch):
+		if FLAGS.validation_all:
+			return False
 		if FLAGS.continue_training or FLAGS.validation_only:
-			return os.path.isdir(f"./model-files/{get_model_name(epoch + 1)}")
-		else:
-			return FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch
+			return \
+				os.path.isdir(f"./model-files/{get_model_name(epoch )}") and \
+				os.path.isdir(f"./model-files/{get_model_name(epoch + 1)}")
+		return FLAGS.read_model_epoch != -1 and epoch < FLAGS.read_model_epoch
 
 	def should_train(epoch):
-		if FLAGS.validation_only:
+		if FLAGS.validation_only or FLAGS.validation_all:
 			return False
 		if FLAGS.continue_training:
 			return not os.path.isdir(f"./model-files/{get_model_name(epoch)}")

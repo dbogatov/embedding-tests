@@ -15,12 +15,16 @@ cd /project/privknn/embedding-tests/
 module load cuda/11.2
 
 MAX_BETA=50
+STEP=1.0
 
-while getopts "b:t:" o
+while getopts "s:b:t:" o
 do
 	case "${o}" in
 		b)
 			MAX_BETA="${OPTARG}"
+			;;
+		s)
+			STEP="${OPTARG}"
 			;;
 		t)
 			TREC="${OPTARG}"
@@ -33,14 +37,14 @@ do
 done
 shift $((OPTIND-1))
 
-for beta in $(seq 1 ${MAX_BETA})
+for beta in $(seq -f "%.1f" 0.0 $STEP $MAX_BETA)
 do
 	time taskset --cpu-list 1,2,3,4,5,6,7,8 python3 ./inversion_bert.py \
 		--do_lower_case True \
 		--learning True \
 		--read_files /projectnb/privknn/attack-data$TREC \
 		--validation_only True \
-		--encrypted_tag encrypted-${beta}.0-
+		--encrypted_tag encrypted-${beta}-
 done
 
 echo "Done!"

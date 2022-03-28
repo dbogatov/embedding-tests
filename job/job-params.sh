@@ -14,7 +14,7 @@ echo "Start!"
 cd /project/privknn/embedding-tests/
 module load cuda/11.2
 
-while getopts "e:m:t:c:nu" o
+while getopts "e:m:t:c:nuv" o
 do
 	case "${o}" in
 		e)
@@ -35,6 +35,9 @@ do
 		u)
 			CONTINUE_TRAINING="--continue_training True"
 			;;
+		v)
+			VALIDATION_ONLY="--validation_only True"
+			;;
 		*)
 			echo "Problem with CLI"
 			exit 1
@@ -51,7 +54,8 @@ time taskset --cpu-list 1,2,3,4,5,6,7,8 python3 ./inversion_bert.py \
 	$READ_MODEL \
 	$ENC_TAG \
 	$ENC_TRAINING \
-	$CONTINUE_TRAINING
+	$CONTINUE_TRAINING \
+	$VALIDATION_ONLY
 
 # command 2>&1 | tee logs/log-$(date +%m-%d-%Y-%H-%M-%S).txt
 
